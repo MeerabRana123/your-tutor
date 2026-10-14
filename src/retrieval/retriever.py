@@ -116,6 +116,10 @@ class BM25Retriever:
                 denominator = freq + self.k1 * (1.0 - self.b + self.b * (doc_len / self.avg_doc_length))
                 scores[doc_idx] += idf_val * (numerator / denominator)
 
+        unique_query_tokens = set(query_tokens)
+        query_token_count = len(unique_query_tokens)
+        min_term_coverage = 0.40
+
         # Pair scores with chunk indexes and sort descending
         ranked_indices = sorted(
             range(self.corpus_size), key=lambda i: scores[i], reverse=True
@@ -127,6 +131,13 @@ class BM25Retriever:
             score = scores[idx]
             if score < threshold:
                 break  # Subsequent scores are lower
+
+            # Guardrail: Check query term coverage to avoid spurious matches on generic words
+            if query_token_count >= 3:
+                matched_tokens = sum(1 for t in unique_query_tokens if self.term_freqs[idx].get(t, 0) > 0)
+                coverage = matched_tokens / query_token_count
+                if coverage < min_term_coverage:
+                    continue
 
             chunk = self.chunks[idx]
             results.append(

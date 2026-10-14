@@ -5,7 +5,7 @@ and citation auditing into a cohesive, verified instructional workflow.
 """
 
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from src.core.models import (
     SourceDocument,
     ContentChunk,
@@ -19,6 +19,9 @@ from src.providers.base import BaseModelProvider
 from src.providers.mock_provider import MockDeterministicProvider
 from src.providers.gemini_provider import GeminiProvider
 from src.grounding.citation_auditor import CitationAuditor
+from src.bkt.engine import BKTEngine
+from src.assessment.models import AssessmentQuestion, AssessmentResult
+from src.assessment.generator import AssessmentGenerator
 
 
 class TutorService:
@@ -33,11 +36,14 @@ class TutorService:
         provider: Optional[BaseModelProvider] = None,
         auditor: Optional[CitationAuditor] = None,
         pdf_ingestor: Optional[PDFIngestor] = None,
+        bkt_engine: Optional[BKTEngine] = None,
+        assessment_generator: Optional[AssessmentGenerator] = None,
     ):
         self.db = db or Database()
         self.retriever = retriever or BM25Retriever()
         self.auditor = auditor or CitationAuditor()
         self.pdf_ingestor = pdf_ingestor or PDFIngestor()
+        self.bkt_engine = bkt_engine or BKTEngine()
 
         # Set provider: default to Gemini if configured, otherwise Mock
         if provider:
@@ -45,6 +51,10 @@ class TutorService:
         else:
             gemini = GeminiProvider()
             self.provider = gemini if gemini.is_available() else MockDeterministicProvider()
+
+        self.assessment_generator = assessment_generator or AssessmentGenerator(
+            gemini_provider=self.provider if isinstance(self.provider, GeminiProvider) else None
+        )
 
         # Load existing chunks from DB into retriever if available
         self._refresh_retriever_index()
@@ -152,3 +162,84 @@ class TutorService:
             audit_result=audit,
             retrieved_evidence=[],
         )
+
+    def generate_assessment(
+        self, topic_hint: Optional[str] = None, difficulty: str = "intermediate"
+    ) -> AssessmentQuestion:
+        """
+        Generates a Multiple-Choice Question grounded in indexed course materials.
+        Raises ValueError if no course materials have been ingested.
+        """
+        all_chunks = self.db.get_all_chunks()
+        if not all_chunks:
+            raise ValueError("Cannot generate assessment: No course materials have been ingested yet.")
+
+        # If topic_hint provided, retrieve relevant chunks; otherwise use all chunks
+        if topic_hint:
+            evidence = self.retriever.search(topic_hint, top_k=3, min_score=0.2)
+            if evidence:
+                # Map EvidenceItem back to ContentChunk
+                chunk_ids = {e.chunk_id for e in evidence}
+                target_chunks = [c for c in all_chunks if c.chunk_id in chunk_ids]
+            else:
+                target_chunks = all_chunks
+        else:
+            target_chunks = all_chunks
+
+        return self.assessment_generator.generate_question(
+            chunks=target_chunks,
+            topic_hint=topic_hint,
+            difficulty=difficulty,
+        )
+
+    def submit_assessment(
+        self,
+        student_id: str,
+        question: AssessmentQuestion,
+        student_choice: str,
+    ) -> AssessmentResult:
+        """
+        Evaluates student answer deterministically, updates BKT mastery,
+        persists the updated state, and generates a grounded revision recommendation if incorrect.
+        """
+        is_correct = self.assessment_generator.evaluate_answer(question, student_choice)
+
+        # Retrieve prior mastery or initialize with BKT p_l0
+        prior_p = self.db.get_topic_mastery(student_id, question.topic)
+        if prior_p is None:
+            prior_p = self.bkt_engine.p_l0
+
+        # Compute BKT posterior and next prior incorporating learning transition
+        posterior_p, next_prior = self.bkt_engine.update_mastery(prior_p, is_correct)
+
+        # Persist updated mastery to SQLite
+        self.db.save_topic_mastery(student_id, question.topic, next_prior, is_correct)
+
+        mastery_delta = round(next_prior - prior_p, 4)
+
+        # Generate source-grounded revision recommendation on failure
+        revision_rec = None
+        if not is_correct:
+            revision_rec = (
+                f"Revision Recommendation: You missed this question on {question.topic}. "
+                f"Please review Page {question.page_number} of {question.source_document} to strengthen your understanding."
+            )
+
+        return AssessmentResult(
+            question_id=question.question_id,
+            topic=question.topic,
+            student_choice=student_choice.strip().upper(),
+            is_correct=is_correct,
+            correct_answer=question.correct_answer,
+            explanation=question.explanation,
+            citation_label=question.citation_label,
+            prior_mastery=prior_p,
+            posterior_mastery=next_prior,
+            mastery_delta=mastery_delta,
+            revision_recommendation=revision_rec,
+        )
+
+    def get_student_masteries(self, student_id: str) -> Dict[str, float]:
+        """Returns all topic mastery probabilities for a student."""
+        return self.db.get_all_topic_masteries(student_id)
+

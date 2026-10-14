@@ -3,7 +3,7 @@
 [![Track](https://img.shields.io/badge/Hackathon-Multimodal%20AI%202026-blue.svg)](https://github.com)
 [![Track D](https://img.shields.io/badge/Track%20D-Personalized%20Tutoring%20%26%20Adaptive%20Learning-green.svg)](https://github.com)
 [![Python](https://img.shields.io/badge/Python-3.13%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-10%20Passed%20(100%25)-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-20%20Passed%20(100%25)-brightgreen.svg)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 > **Central Product Principle:**
@@ -11,48 +11,38 @@
 
 ---
 
-## 1. Project Overview
+## 1. Project Overview & Hackathon MVP
 
-**Your Tutor** is an academic AI learning companion built for rigorous university-level courses (exemplar curriculum: *Introductory Machine Learning & Deep Learning*).
+**Your Tutor** is an academic AI learning companion built for rigorous university-level courses (demonstrated on an *Introductory Machine Learning & Deep Learning* curriculum).
 
-Unlike generic conversational RAG wrappers that hallucinate external citations or convert course materials into lossy text dumps, **Your Tutor** enforces **strict physical provenance** down to the source page, slide number, or video timestamp, coupled with an **independent citation verification layer** and **offline deterministic fallback**.
+Unlike generic conversational RAG wrappers that hallucinate external citations or convert course materials into lossy text dumps, **Your Tutor** enforces **strict physical provenance** down to the source page, an **independent citation auditing layer**, **adaptive multiple-choice assessment generation**, **standard Bayesian Knowledge Tracing (BKT)**, and an **offline deterministic engine** requiring zero external API keys.
 
 ---
 
-## 2. Milestone 1: Grounding Engine (Current Implementation)
+## 2. System Architecture & Feature Matrix
 
-Milestone 1 delivers the complete, verified, end-to-end vertical slice of the source-grounded tutoring engine:
+### Completed MVP Capabilities (Verified & Tested)
+- [x] **Page-Aware PDF Ingestion**: Extracts text chunks retaining physical `page_number`, `document_id`, and `filename` using PyMuPDF / PyPDF.
+- [x] **Idempotent Ingestion**: Re-uploading a document cleanly replaces records in SQLite without accumulating duplicates.
+- [x] **Okapi BM25 Lexical Retrieval**: Query-term coverage guardrails prevent false positives on generic stop words.
+- [x] **Grounded Refusal Guardrails**: Out-of-domain queries (*"How do I bake sourdough bread?"*) are safely rejected rather than hallucinating course facts.
+- [x] **Independent Citation Auditing**: The `CitationAuditor` verifies that every `[Source: file, Page N]` citation matches retrieved evidence and flags unverified claims.
+- [x] **Adaptive Assessment Generation**: Generates 4-option MCQs directly grounded in course text with validated answer keys and transparent generator mode (`offline_template` vs `gemini`).
+- [x] **Bayesian Knowledge Tracing (BKT)**: Standard Corbett & Anderson (1994) closed-form posterior updates for $P(L_0)$, $P(T)$, $P(G)$, and $P(S)$ with division-by-zero clamping.
+- [x] **Adaptive Personalization**: Responses update topic mastery in real-time. Missed questions trigger grounded revision recommendations citing the exact source page.
+- [x] **Reproducible Evaluation Benchmark**: 8-item ground truth suite testing in-domain retrieval and out-of-domain refusal with 100% verified accuracy.
+- [x] **Dual-Provider Model Abstraction**:
+  - **Google Gemini**: Uses `google.genai` SDK when `GEMINI_API_KEY` is present.
+  - **Offline Deterministic Mock**: Runs 100% offline with zero external network or API key requirements.
 
-```
-[PDF Upload]
-     │
-     ▼
-[PDF Ingestor (PyMuPDF / PyPDF Fallback)]
-     │
-     ▼
-[SQLite Document & Chunk Store (Foreign Keys + WAL Mode)]
-     │
-     ▼
-[Okapi BM25 Lexical Retriever (Stopword Filter + Robertson-Spärck Jones IDF)]
-     │
-     ├──────────────────────────────────────────────┐
-     ▼ (Evidence Above Threshold)                   ▼ (Below Threshold / Out-of-Domain)
-[Model Provider (Gemini / Offline Mock)]       [Standard Grounded Refusal]
-     │                                              │
-     ▼                                              ▼
-[Citation Auditor (Validates [Source, Page])]  [Safe, Verified Response to Student]
-```
+### Planned / Post-Hackathon Deferred Scope (Honest Boundaries)
+- [ ] Direct video audio extraction from raw `.mp4` (deferred due to missing host FFmpeg binary; transcript sidecars supported).
+- [ ] Presentation deck (`.pptx`) slide ingestion (designed in architecture, deferred to next release).
+- [ ] Multi-skill item response theory (MIRT) and deep knowledge tracing (DKT).
+- [ ] Graph-based prerequisite DAG remediation (recommendations are currently topic-grounded page citations).
 
-### Milestone 1 Key Capabilities
-1. **Physical Page Provenance**: Every extracted text chunk carries its physical `page_number`, `document_id`, and `filename`.
-2. **Idempotent Ingestion**: Re-uploading a document cleanly replaces chunks in SQLite without duplicating content.
-3. **Calibrated BM25 Retrieval**: Ranks course chunks with term-frequency and document-length normalization; drops below-threshold queries.
-4. **Strict Grounded Refusal**: Rejects out-of-domain or unsupported queries (*"I could not find sufficient evidence..."*) rather than hallucinating course facts.
-5. **Independent Citation Auditing**: The `CitationAuditor` parses all `[Source: <filename>, Page <N>]` tokens, asserting that each citation maps to an actual chunk in the retrieved context set.
-6. **Guardrail Protection**: If an audit fails (e.g., an LLM produces a hallucinated page number), the answer is withheld and an explicit audit warning is displayed.
-7. **Dual-Provider Architecture**:
-   - **Google Gemini**: Uses `google.genai` SDK when `GEMINI_API_KEY` is present.
-   - **Offline Deterministic Mock**: Runs 100% offline with zero external network or API key requirements, enabling reproducible testing and zero-token demonstrations.
+> **Pedagogical Note on Mastery:**
+> Mastery values $P(L)$ are statistical estimates of latent proficiency over practice items under stationary Markov assumptions, not certified or infallible measurements of human intelligence.
 
 ---
 
@@ -60,49 +50,60 @@ Milestone 1 delivers the complete, verified, end-to-end vertical slice of the so
 
 ```
 Your Tutor/
-├── app.py                            # Streamlit web application
-├── demo_cli.py                       # Command-line demonstration tool
-├── pytest.ini                        # Pytest configuration (pythonpath = .)
-├── requirements.txt                  # Minimal pinned project dependencies
-├── .env.example                      # Environment variable template
-├── .gitignore                        # Git exclusion rules (ignores secrets & DBs)
-├── docs/                             # Complete Phase 1 & 2 engineering documentation
-│   ├── ARCHITECTURE.md               # System topology, data flows, and security
-│   ├── ARCHITECTURE_DECISIONS.md     # 7 formal Architecture Decision Records (ADRs)
-│   ├── DATA_MODEL.md                 # Pydantic v2 schemas and SQLite DDL
-│   ├── INTERFACES.md                 # Abstract base class interface specifications
-│   ├── REQUIREMENTS.md               # Formal SRS with unique IDs and criteria
-│   ├── FEASIBILITY_AND_RISKS.md      # Feasibility analysis and empirical checks
-│   ├── SDLC_ROADMAP.md               # 9-stage roadmap and milestone definitions
-│   └── PROJECT_CHARTER.md            # Vision, scope, and rubric mapping
-├── src/                              # Core implementation package
+├── app.py                                        # Streamlit 3-tab web application
+├── demo_cli.py                                   # Headless/interactive CLI demonstrator
+├── pytest.ini                                    # Pytest configuration (pythonpath = .)
+├── requirements.txt                              # Minimal pinned project dependencies
+├── .env.example                                  # Environment variable template
+├── .gitignore                                    # Git exclusion rules (ignores secrets & DBs)
+├── docs/                                         # Complete engineering documentation
+│   ├── ARCHITECTURE.md                           # System topology and data flows
+│   ├── ARCHITECTURE_DECISIONS.md                 # 7 formal ADRs
+│   ├── DATA_MODEL.md                             # Pydantic v2 schemas and SQLite DDL
+│   ├── INTERFACES.md                             # Abstract base class specifications
+│   ├── REQUIREMENTS.md                           # Formal SRS with unique IDs
+│   ├── FEASIBILITY_AND_RISKS.md                  # Feasibility and environment checks
+│   ├── SDLC_ROADMAP.md                           # Phased execution plan
+│   └── PROJECT_CHARTER.md                        # Vision, scope, and rubric mapping
+├── eval/                                         # Reproducible evaluation suite
+│   ├── benchmark.py                              # 8-item benchmark runner
+│   └── benchmark_report.json                     # Generated empirical evaluation report
+├── src/                                          # Core implementation package
+│   ├── assessment/
+│   │   ├── generator.py                          # Grounded MCQ generator & answer checker
+│   │   └── models.py                             # Assessment and submission data models
+│   ├── bkt/
+│   │   └── engine.py                             # Corbett & Anderson BKT mathematics
 │   ├── core/
-│   │   ├── database.py               # SQLite persistence layer (WAL + foreign keys)
-│   │   ├── models.py                 # Pydantic models for chunks, evidence, and audit
-│   │   └── tutor_service.py          # Orchestrator service
+│   │   ├── database.py                           # SQLite persistence (WAL + foreign keys)
+│   │   ├── models.py                             # Core domain models
+│   │   └── tutor_service.py                      # Orchestrator service
+│   ├── grounding/
+│   │   └── citation_auditor.py                   # Independent citation auditor
 │   ├── ingestion/
-│   │   └── pdf_ingestor.py           # Page-aware PDF text extractor (PyMuPDF + pypdf)
-│   ├── retrieval/
-│   │   └── retriever.py              # Pure-Python Okapi BM25 retriever
+│   │   └── pdf_ingestor.py                       # Page-aware PDF extractor (PyMuPDF + pypdf)
 │   ├── providers/
-│   │   ├── base.py                   # BaseModelProvider abstract interface
-│   │   ├── mock_provider.py          # Offline deterministic mock provider
-│   │   └── gemini_provider.py        # Live Google GenAI (Gemini) provider
-│   └── grounding/
-│       └── citation_auditor.py       # Independent citation auditing engine
-└── tests/
+│   │   ├── base.py                               # BaseModelProvider interface
+│   │   ├── gemini_provider.py                    # Live Google GenAI SDK provider
+│   │   └── mock_provider.py                      # Offline deterministic mock provider
+│   └── retrieval/
+│       └── retriever.py                          # Okapi BM25 retriever with stopword filtering
+└── tests/                                        # Automated test suite (20 tests)
     ├── fixtures/
-    │   ├── generate_test_pdf.py      # Synthetic 4-page ML PDF fixture generator
-    │   └── synthetic_ml_notes.pdf    # Generated test PDF fixture
-    └── test_milestone1_grounding.py  # 10 automated unit & integration tests
+    │   ├── generate_test_pdf.py                  # Generates synthetic test PDF
+    │   └── synthetic_ml_notes.pdf                # 4-page test PDF fixture
+    ├── test_assessment_and_personalization.py    # Assessment & personalization tests
+    ├── test_bkt_math.py                          # BKT math & parameter tests
+    ├── test_evaluation_benchmark.py              # Automated benchmark test
+    └── test_milestone1_grounding.py              # 10 grounding & provenance tests
 ```
 
 ---
 
 ## 4. Quickstart Guide (Windows PowerShell)
 
-### Step 1: Environment Setup
-Ensure Python 3.11+ is installed. Clone the repository and install requirements:
+### Step 1: Install Dependencies
+Ensure Python 3.11+ is installed:
 
 ```powershell
 # Navigate to project directory
@@ -113,16 +114,16 @@ pip install -r requirements.txt
 ```
 
 ### Step 2: (Optional) Configure Gemini API Key
-To use live Google Gemini generation, copy `.env.example` to `.env` and insert your key:
+To use live Google Gemini generation, copy `.env.example` to `.env` and set your key:
 
 ```powershell
 Copy-Item .env.example .env
 # Edit .env and set: GEMINI_API_KEY=your_key_here
 ```
-> **Note:** If no key is set, the application automatically runs in **Offline Deterministic Mode**, which requires zero API keys or network access.
+> **Note:** If no key is set, the application automatically runs in **Offline Deterministic Mode**, requiring zero API keys or network access.
 
-### Step 3: Run the Automated Test Suite
-Execute the 10-point grounding and audit test suite:
+### Step 3: Run the Full Test Suite
+Run all 20 unit and integration tests across grounding, BKT, assessments, and benchmarks:
 
 ```powershell
 pytest -v
@@ -130,46 +131,83 @@ pytest -v
 
 Expected output:
 ```text
-tests/test_milestone1_grounding.py::test_pdf_extraction_preserves_page_numbers PASSED
-tests/test_milestone1_grounding.py::test_empty_or_corrupt_pdf_fails_gracefully PASSED
-tests/test_milestone1_grounding.py::test_chunking_preserves_source_provenance PASSED
-tests/test_milestone1_grounding.py::test_relevant_question_retrieves_expected_evidence PASSED
-tests/test_milestone1_grounding.py::test_returned_citations_refer_to_retrieved_evidence PASSED
-tests/test_milestone1_grounding.py::test_unsupported_questions_trigger_insufficient_evidence PASSED
-tests/test_milestone1_grounding.py::test_invalid_or_fabricated_citations_fail_audit PASSED
-tests/test_milestone1_grounding.py::test_failed_audit_blocks_verified_answer_display PASSED
-tests/test_milestone1_grounding.py::test_reingesting_document_does_not_duplicate_chunks PASSED
-tests/test_milestone1_grounding.py::test_database_records_remain_correctly_associated PASSED
+tests/test_assessment_and_personalization.py::test_assessment_question_validation PASSED [  5%]
+tests/test_assessment_and_personalization.py::test_grounded_question_generation PASSED [ 10%]
+tests/test_assessment_and_personalization.py::test_deterministic_answer_evaluation PASSED [ 15%]
+tests/test_assessment_and_personalization.py::test_end_to_end_assessment_personalization_flow PASSED [ 20%]
+tests/test_bkt_math.py::test_bkt_parameter_validation PASSED             [ 25%]
+tests/test_bkt_math.py::test_bkt_correct_answer_increases_mastery PASSED [ 30%]
+tests/test_bkt_math.py::test_bkt_incorrect_answer_decreases_mastery PASSED [ 35%]
+tests/test_bkt_math.py::test_bkt_numerical_stability_long_sequence PASSED [ 40%]
+tests/test_bkt_math.py::test_bkt_sqlite_persistence PASSED               [ 45%]
+tests/test_evaluation_benchmark.py::test_reproducible_evaluation_benchmark PASSED [ 50%]
+tests/test_milestone1_grounding.py::test_pdf_extraction_preserves_page_numbers PASSED [ 55%]
+tests/test_milestone1_grounding.py::test_empty_or_corrupt_pdf_fails_gracefully PASSED [ 60%]
+tests/test_milestone1_grounding.py::test_chunking_preserves_source_provenance PASSED [ 65%]
+tests/test_milestone1_grounding.py::test_relevant_question_retrieves_expected_evidence PASSED [ 70%]
+tests/test_milestone1_grounding.py::test_returned_citations_refer_to_retrieved_evidence PASSED [ 75%]
+tests/test_milestone1_grounding.py::test_unsupported_questions_trigger_insufficient_evidence PASSED [ 80%]
+tests/test_milestone1_grounding.py::test_invalid_or_fabricated_citations_fail_audit PASSED [ 85%]
+tests/test_milestone1_grounding.py::test_failed_audit_blocks_verified_answer_display PASSED [ 90%]
+tests/test_milestone1_grounding.py::test_reingesting_document_does_not_duplicate_chunks PASSED [ 95%]
+tests/test_milestone1_grounding.py::test_database_records_remain_correctly_associated PASSED [100%]
 
-============================= 10 passed in 3.50s ==============================
+============================= 20 passed in 2.68s ==============================
 ```
 
-### Step 4: Run the CLI Demonstration
-Execute the terminal demonstrator with sample in-domain and out-of-domain queries:
+### Step 4: Run the Reproducible Evaluation Benchmark
+Execute the standalone benchmark runner:
 
 ```powershell
-# In-Domain Query (Backpropagation)
-python demo_cli.py --query "What is backpropagation and how is the chain rule applied?"
-
-# Out-of-Domain Query (Demonstrates Grounded Refusal)
-python demo_cli.py --query "How do I make chocolate chip cookies?"
+python eval/benchmark.py
 ```
 
-### Step 5: Launch the Streamlit Web App
-Launch the interactive web interface:
+Observed metrics:
+- In-Domain Retrieval Precision@1: `100.0%`
+- Citation Audit Pass Rate: `100.0%`
+- Out-of-Domain Refusal Rate: `100.0%`
+- Overall Benchmark Accuracy: `100.0%`
+
+### Step 5: Run the CLI Demonstrator
+Test grounded answering and refusal directly in the terminal:
+
+```powershell
+# In-Domain Query
+python demo_cli.py --query "What is backpropagation and how is the chain rule applied?"
+
+# Out-of-Domain Query (Refusal Demo)
+python demo_cli.py --query "What temperature is required to bake a sourdough loaf in a Dutch oven?"
+```
+
+### Step 6: Launch the Streamlit Web Application
+Launch the interactive 3-tab web dashboard:
 
 ```powershell
 streamlit run app.py
 ```
-Open your browser at `http://localhost:8501`.
+Open `http://localhost:8501` in your browser.
 
 ---
 
-## 5. Troubleshooting & FAQ
+## 5. Manual Demonstration Steps (Recording Guide)
 
-- **Q: Does this project require Docker or an external vector database?**
-  - **A:** No. Milestone 1 runs entirely in pure Python using SQLite and in-memory BM25 indexing. No Docker, Redis, or external vector daemon is needed.
-- **Q: What happens if `GEMINI_API_KEY` is not set?**
-  - **A:** The system operates using the `MockDeterministicProvider`. It produces extractive answers with verifiable citations directly from course materials, clearly labeled with `[Provider: offline_mock]`.
-- **Q: How does the system handle corrupted or 0-byte PDFs?**
-  - **A:** The `PDFIngestor` catches file format errors and raises a typed `PDFIngestionError`, logging the issue without halting the application.
+Follow these exact steps when recording a demo video for judges:
+
+1. **Ingestion**:
+   - In the sidebar, check "Use Synthetic ML Notes Fixture" and click **🚀 Ingest Document**.
+   - Note the success message: `✅ Ingested 'synthetic_ml_notes.pdf' (4 pages, 4 chunks)`.
+2. **Tab 1: Grounded Q&A**:
+   - Select `"What is backpropagation and how does the chain rule apply?"` and click **Submit Question**.
+   - Show the answer with `[Source: synthetic_ml_notes.pdf, Page 3]` citation, `Provider: offline_mock`, and `Citation Audit: PASSED ✅`.
+   - Select `"What temperature is required to bake a sourdough loaf in a Dutch oven?"` and submit.
+   - Show the refusal: *"I could not find sufficient evidence in the uploaded material to answer this question."*
+3. **Tab 2: Adaptive Practice & BKT Mastery**:
+   - Select topic `"Backpropagation and the Chain Rule"` and click **🎲 Generate Practice Item**.
+   - Point out the physical source citation (`[Source: synthetic_ml_notes.pdf, Page 3]`) and generator mode (`offline_template`).
+   - Select Option `B` and click **Submit Answer**. Show the success message and positive BKT mastery shift ($\Delta P(L) > 0$).
+   - Point out the updated progress bar in the Learner Mastery Dashboard.
+   - Generate a question on `"Loss and Cost Functions"`, select an incorrect option, and submit.
+   - Show the BKT mastery decrease and the targeted revision recommendation: *"Revision Recommendation: Please review Page 1 of synthetic_ml_notes.pdf"*.
+4. **Tab 3: Evaluation Benchmark**:
+   - Click **▶️ Execute Benchmark Suite**.
+   - Show the 4 metric cards (100% Precision, 100% Audit, 100% Refusal) and the itemized dataframe.

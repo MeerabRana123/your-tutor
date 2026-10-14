@@ -5,8 +5,9 @@ and idempotent document/chunk storage.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from src.core.models import SourceDocument, ContentChunk, SourceType
 
 
@@ -15,17 +16,23 @@ class Database:
 
     def __init__(self, db_path: str = "data/your_tutor.db"):
         self.db_path = db_path
-        if db_path != ":memory:":
+        self._mem_conn = None
+        if db_path == ":memory:":
+            self._mem_conn = sqlite3.connect(":memory:")
+            self._mem_conn.row_factory = sqlite3.Row
+            self._mem_conn.execute("PRAGMA foreign_keys = ON;")
+        else:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Returns a connection with foreign key enforcement and row factory."""
+        if self._mem_conn is not None:
+            return self._mem_conn
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
-        if self.db_path != ":memory:":
-            conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA journal_mode = WAL;")
         return conn
 
     def init_db(self) -> None:
@@ -54,6 +61,17 @@ class Database:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON content_chunks(document_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_page ON content_chunks(page_number);")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS topic_mastery (
+                    student_id TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    p_mastery REAL NOT NULL,
+                    total_attempts INTEGER NOT NULL DEFAULT 0,
+                    correct_attempts INTEGER NOT NULL DEFAULT 0,
+                    last_updated TEXT NOT NULL,
+                    PRIMARY KEY (student_id, topic)
+                );
+            """)
             conn.commit()
 
     def save_document(self, doc: SourceDocument) -> None:
@@ -187,3 +205,71 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM source_documents WHERE document_id = ?;", (document_id,))
             conn.commit()
+
+    def get_topic_mastery(self, student_id: str, topic: str) -> Optional[float]:
+        """Returns the current BKT mastery probability for a student and topic, or None."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT p_mastery FROM topic_mastery WHERE student_id = ? AND topic = ?;",
+                (student_id, topic)
+            ).fetchone()
+            if row:
+                return float(row["p_mastery"])
+            return None
+
+    def save_topic_mastery(
+        self, student_id: str, topic: str, p_mastery: float, is_correct: bool
+    ) -> None:
+        """Upserts a student's topic mastery and increments attempt counters."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT total_attempts, correct_attempts FROM topic_mastery WHERE student_id = ? AND topic = ?;",
+                (student_id, topic)
+            ).fetchone()
+            if row:
+                total = row["total_attempts"] + 1
+                correct = row["correct_attempts"] + (1 if is_correct else 0)
+                conn.execute("""
+                    UPDATE topic_mastery SET
+                        p_mastery = ?,
+                        total_attempts = ?,
+                        correct_attempts = ?,
+                        last_updated = ?
+                    WHERE student_id = ? AND topic = ?;
+                """, (p_mastery, total, correct, now, student_id, topic))
+            else:
+                conn.execute("""
+                    INSERT INTO topic_mastery (
+                        student_id, topic, p_mastery, total_attempts, correct_attempts, last_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?);
+                """, (student_id, topic, p_mastery, 1, 1 if is_correct else 0, now))
+            conn.commit()
+
+    def get_all_topic_masteries(self, student_id: str) -> Dict[str, float]:
+        """Returns a mapping of topic -> p_mastery for all tracked topics for a student."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT topic, p_mastery FROM topic_mastery WHERE student_id = ? ORDER BY topic ASC;",
+                (student_id,)
+            ).fetchall()
+            return {r["topic"]: float(r["p_mastery"]) for r in rows}
+
+    def get_topic_mastery_details(self, student_id: str, topic: str) -> Optional[dict]:
+        """Returns detailed stats for a topic including attempts and accuracy."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM topic_mastery WHERE student_id = ? AND topic = ?;",
+                (student_id, topic)
+            ).fetchone()
+            if row:
+                return {
+                    "student_id": row["student_id"],
+                    "topic": row["topic"],
+                    "p_mastery": float(row["p_mastery"]),
+                    "total_attempts": int(row["total_attempts"]),
+                    "correct_attempts": int(row["correct_attempts"]),
+                    "last_updated": row["last_updated"],
+                }
+            return None
+
