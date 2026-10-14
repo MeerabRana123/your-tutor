@@ -1,0 +1,16 @@
+# Core Data Modeling and Validation
+pydantic>=2.7.0
+
+# PDF Ingestion
+pymupdf>=1.24.0
+pypdf>=5.0.0
+
+# Generative AI SDK (Modern Google GenAI)
+google-genai>=0.1.0
+
+# User Interface
+streamlit>=1.35.0
+
+# Testing and Synthetic Fixture Generation
+pytest>=8.0.0
+reportlab>=4.0.0
