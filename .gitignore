@@ -1,0 +1,35 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets and local configurations
+.env
+*.key
+*.pem
+secrets/
+
+# Databases and data caches
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/your_tutor.db*
+data/extracted_media/*
+!data/extracted_media/.gitkeep
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
