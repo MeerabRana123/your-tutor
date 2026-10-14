@@ -6,8 +6,13 @@ mandatory citation enforcement, prompt-injection defense, and zero secret leakag
 
 import os
 from typing import List, Optional
+from dotenv import load_dotenv
+
 from src.core.models import EvidenceItem, ProviderResponse
 from src.providers.base import BaseModelProvider
+
+# Load environment variables from .env if present
+load_dotenv()
 
 
 class GeminiProvider(BaseModelProvider):
@@ -112,3 +117,25 @@ class GeminiProvider(BaseModelProvider):
             )
         except Exception as e:
             raise RuntimeError(f"Gemini API request failed: {e}")
+
+    def generate_raw(
+        self, prompt: str, system_instruction: Optional[str] = None
+    ) -> str:
+        """Calls Gemini directly with raw prompt and optional system instructions."""
+        if not self.is_available():
+            raise RuntimeError(
+                "GeminiProvider is not available. Ensure GEMINI_API_KEY is configured in your environment."
+            )
+        try:
+            config = {"temperature": 0.2}
+            if system_instruction:
+                config["system_instruction"] = system_instruction
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=config,
+            )
+            return response.text.strip() if response.text else ""
+        except Exception as e:
+            raise RuntimeError(f"Gemini API request failed: {e}")
+

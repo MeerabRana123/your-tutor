@@ -9,6 +9,7 @@ Demonstrates:
 6. Reproducible evaluation benchmark reporting
 """
 
+import os
 from pathlib import Path
 import streamlit as st
 
@@ -48,21 +49,37 @@ with st.sidebar:
     student_id = st.text_input("Active Student ID:", value=st.session_state.student_id)
     st.session_state.student_id = student_id
 
+    # Gemini API Key configuration
+    st.subheader("🔑 Gemini API Key")
+    current_key = os.getenv("GEMINI_API_KEY", "")
+    gemini_key_input = st.text_input(
+        "Enter GEMINI_API_KEY (Optional):",
+        type="password",
+        value=st.session_state.get("user_gemini_key", current_key),
+        help="Optional: paste your Gemini API key to activate live generative Q&A and dynamic question creation. If blank, the app runs in 100% offline deterministic mode.",
+    )
+    if gemini_key_input:
+        st.session_state.user_gemini_key = gemini_key_input.strip()
+        os.environ["GEMINI_API_KEY"] = gemini_key_input.strip()
+
     # Model Provider Selection
-    gemini_avail = GeminiProvider().is_available()
+    active_key = st.session_state.get("user_gemini_key") or os.getenv("GEMINI_API_KEY")
+    gemini_provider_candidate = GeminiProvider(api_key=active_key)
+    gemini_avail = gemini_provider_candidate.is_available()
+
     provider_choice = st.radio(
         "Model Provider:",
-        options=["Offline Deterministic Engine", "Google Gemini"],
+        options=["Offline Deterministic Engine", "Google Gemini (Live)"],
         index=1 if gemini_avail else 0,
         help="Offline mode uses template grounding and zero external API keys.",
     )
 
-    if provider_choice == "Google Gemini":
+    if provider_choice == "Google Gemini (Live)":
         if gemini_avail:
-            service.set_provider(GeminiProvider())
+            service.set_provider(gemini_provider_candidate)
             st.success("🟢 Live Gemini Provider Active")
         else:
-            st.warning("⚠️ GEMINI_API_KEY not configured. Running in Offline Mode.")
+            st.warning("⚠️ No valid GEMINI_API_KEY detected. Running in Offline Mode.")
             service.set_provider(MockDeterministicProvider())
     else:
         service.set_provider(MockDeterministicProvider())
@@ -133,9 +150,16 @@ with tab_qa:
         "What temperature is required to bake a sourdough loaf in a Dutch oven?",  # Refusal demo
     ]
 
-    selected_sample = st.selectbox("Sample Course & Out-of-Domain Queries:", [""] + sample_queries)
+    selected_sample = st.selectbox(
+        "💡 Preset Evaluation Shortcuts (Select one to load, or leave blank to write your own):",
+        [""] + sample_queries,
+        help="These presets are quick shortcuts for evaluation. You can also type any custom question below!",
+    )
+
+    st.caption("💡 **Note:** The dropdown above contains quick evaluation presets. You can also type **any arbitrary question** in the input field below to test dynamic BM25 retrieval against any uploaded document!")
+
     user_query = st.text_input(
-        "Enter your question:",
+        "Enter your question (Arbitrary custom queries supported):",
         value=selected_sample if selected_sample else "",
         placeholder="e.g., How does learning rate alpha govern gradient descent updates?",
     )
@@ -213,9 +237,23 @@ with tab_practice:
         "Overfitting and Regularization",
     ]
 
+    practice_mode = st.radio(
+        "Practice Topic Mode:",
+        options=["Core Curriculum Presets", "Custom Topic / Document Search"],
+        horizontal=True,
+        help="Select a standard syllabus topic or enter any concept from your uploaded PDF.",
+    )
+
     col_top1, col_top2 = st.columns([2, 1])
     with col_top1:
-        chosen_topic = st.selectbox("Select Curriculum Topic to Practice:", available_topics)
+        if practice_mode == "Core Curriculum Presets":
+            chosen_topic = st.selectbox("Select Curriculum Topic:", available_topics)
+        else:
+            chosen_topic = st.text_input(
+                "Enter Concept or Search Term from Material:",
+                value="",
+                placeholder="e.g., Stochastic Gradient Descent, Dropout, Chain Rule...",
+            )
     with col_top2:
         st.write("")
         st.write("")
@@ -224,7 +262,8 @@ with tab_practice:
                 st.error("Please ingest course materials from the sidebar first.")
             else:
                 try:
-                    q = service.generate_assessment(topic_hint=chosen_topic)
+                    topic_arg = chosen_topic.strip() if chosen_topic else None
+                    q = service.generate_assessment(topic_hint=topic_arg)
                     st.session_state.current_question = q
                     st.session_state.last_assessment_result = None
                 except Exception as e:
@@ -237,9 +276,13 @@ with tab_practice:
         st.caption(f"**Source Origin:** `{q.citation_label}` | **Generator Mode:** `{q.generator_mode}`")
         st.markdown(f"**{q.question_stem}**")
 
-        # Radio options
+        # Radio options with dynamic key so selection resets cleanly on new question
         option_labels = [f"{k}: {v}" for k, v in q.options.items()]
-        selected_option = st.radio("Choose your answer:", option_labels, key="practice_radio")
+        selected_option = st.radio(
+            "Choose your answer:",
+            option_labels,
+            key=f"practice_radio_{q.question_id}",
+        )
 
         if st.button("Submit Answer", type="primary"):
             choice_key = selected_option.split(":")[0].strip()

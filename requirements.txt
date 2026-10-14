@@ -14,3 +14,7 @@ streamlit>=1.35.0
 # Testing and Synthetic Fixture Generation
 pytest>=8.0.0
 reportlab>=4.0.0
+
+# Environment Configuration
+python-dotenv>=1.0.0
+

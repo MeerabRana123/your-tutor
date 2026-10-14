@@ -154,3 +154,57 @@ def test_end_to_end_assessment_personalization_flow(tutor_service):
     all_masteries = tutor_service.get_student_masteries(student_id)
     assert q_bp.topic in all_masteries
     assert q_of.topic in all_masteries
+
+
+def test_dynamic_offline_extraction_for_custom_topics(tutor_service):
+    """Verifies that an arbitrary topic not in fixed templates dynamically extracts an MCQ."""
+    q_custom = tutor_service.generate_assessment(topic_hint="unseen advanced topic")
+    assert q_custom is not None
+    assert q_custom.generator_mode == "offline_dynamic_extract"
+    assert q_custom.correct_answer == "A"
+    assert len(q_custom.options) == 4
+    assert q_custom.source_document == FIXTURE_PDF.name
+    assert q_custom.page_number >= 1
+    assert "unseen advanced topic".title() in q_custom.topic
+
+
+def test_mocked_gemini_assessment_generation():
+    """Verifies that AssessmentGenerator parses valid JSON from a live/mocked Gemini provider."""
+    class FakeGeminiProvider:
+        def is_available(self):
+            return True
+        def generate_raw(self, prompt, system_instruction=None):
+            return '''```json
+            {
+                "topic": "Neural Architectures",
+                "question_stem": "What is the primary function of an activation function?",
+                "options": {
+                    "A": "To introduce non-linearity into the network",
+                    "B": "To sort training records",
+                    "C": "To compress weights into 8-bit integers",
+                    "D": "To halt execution when loss diverges"
+                },
+                "correct_answer": "A",
+                "explanation": "Page 1 notes that activation functions introduce non-linearities."
+            }
+            ```'''
+
+    gen = AssessmentGenerator(gemini_provider=FakeGeminiProvider())
+    from src.core.models import ContentChunk, SourceType
+    dummy_chunk = ContentChunk(
+        chunk_id="chk_1",
+        document_id="doc_1",
+        filename="custom_guide.pdf",
+        source_type=SourceType.PDF,
+        page_number=5,
+        text_content="Activation functions introduce non-linearities into neural computation.",
+    )
+
+    q = gen.generate_question([dummy_chunk], topic_hint="Neural Architectures")
+    assert q.generator_mode == "gemini"
+    assert q.topic == "Neural Architectures"
+    assert q.correct_answer == "A"
+    assert q.page_number == 5
+    assert q.source_document == "custom_guide.pdf"
+    assert q.citation_label == "[Source: custom_guide.pdf, Page 5]"
+

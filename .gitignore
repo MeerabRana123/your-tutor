@@ -33,3 +33,11 @@ data/extracted_media/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local secrets and generated files
+.env
+data/*.db
+data/uploads/
+__pycache__/
+.pytest_cache/
+*.pyc

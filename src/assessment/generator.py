@@ -117,18 +117,52 @@ class AssessmentGenerator:
                 if key in hint_lower:
                     selected_key = key
                     break
-
-        if not selected_key:
-            # Match based on text in the available chunks
+        else:
+            # Match based on text in the available chunks only if no topic_hint given
             chunk_text_joined = " ".join(c.text_content.lower() for c in chunks)
             for key, tpl in self.GROUNDED_TOPIC_TEMPLATES.items():
                 if tpl["keyword"] in chunk_text_joined:
                     selected_key = key
                     break
 
-        # Default to first template if no specific match
         if not selected_key:
-            selected_key = "backpropagation"
+            # Dynamic offline extraction from matching chunk
+            matching_chunk = chunks[0]
+            sentences = [
+                s.strip()
+                for s in re.split(r"(?<=[.!?])\s+", matching_chunk.text_content)
+                if len(s.strip()) > 30
+            ]
+            true_statement = sentences[0] if sentences else matching_chunk.text_content[:120] + "..."
+
+            topic_title = topic_hint.strip().title() if topic_hint else "Course Concept"
+            doc_name = matching_chunk.filename
+            page_num = matching_chunk.page_number
+
+            stem = f"According to {doc_name} (Page {page_num}), which of the following statements regarding {topic_title} is supported by the course text?"
+            options = {
+                "A": true_statement,
+                "B": "This concept violates standard convergence bounds and is rejected by the syllabus.",
+                "C": "This concept applies only to unparameterized stochastic distributions.",
+                "D": "None of the above statements are supported by the text on this page."
+            }
+            q_id = hashlib.sha256(
+                f"{doc_name}:p{page_num}:{topic_title}:{true_statement[:30]}".encode()
+            ).hexdigest()[:12]
+
+            return AssessmentQuestion(
+                question_id=f"q_{q_id}",
+                topic=topic_title,
+                difficulty=difficulty,
+                source_document=doc_name,
+                page_number=page_num,
+                citation_label=f"[Source: {doc_name}, Page {page_num}]",
+                question_stem=stem,
+                options=options,
+                correct_answer="A",
+                explanation=f"Page {page_num} explicitly states: '{true_statement}'",
+                generator_mode="offline_dynamic_extract",
+            )
 
         tpl = self.GROUNDED_TOPIC_TEMPLATES[selected_key]
 
@@ -167,21 +201,35 @@ class AssessmentGenerator:
     ) -> AssessmentQuestion:
         """Prompts Gemini to generate a structured MCQ strictly grounded in chunks."""
         primary_chunk = chunks[0]
+        topic_str = topic_hint or "Machine Learning Concept"
         prompt = (
-            "You are an assessment author for a Machine Learning course.\n"
             f"Based strictly on this text from page {primary_chunk.page_number} of {primary_chunk.filename}:\n"
             f"'''{primary_chunk.text_content}'''\n\n"
-            "Generate a Multiple-Choice Question in JSON format with fields:\n"
-            "- topic: string\n"
-            "- question_stem: string\n"
-            "- options: dict with keys 'A', 'B', 'C', 'D'\n"
-            "- correct_answer: string ('A', 'B', 'C', or 'D')\n"
-            "- explanation: string citing the exact sentence from the text\n"
-            "Output JSON ONLY without backticks."
+            f"Generate a Multiple-Choice Question (difficulty: {difficulty}) testing understanding of {topic_str}.\n"
+            "Return a valid JSON object with the following fields:\n"
+            "- topic: string (name of the concept)\n"
+            "- question_stem: string (clear question)\n"
+            "- options: dict with keys 'A', 'B', 'C', 'D' containing distinct textual answers\n"
+            "- correct_answer: single uppercase letter ('A', 'B', 'C', or 'D')\n"
+            "- explanation: string citing the exact sentence from the source page\n"
+            "Return ONLY the JSON object, without markdown formatting or code fences."
         )
 
-        resp = self.gemini_provider.generate_grounded_answer(prompt, [])
-        data = json.loads(re.sub(r"^```json|```$", "", resp.text.strip(), flags=re.MULTILINE))
+        system_instruction = (
+            "You are an expert academic assessment generator for university machine learning courses. "
+            "You create rigorous, unambiguous multiple-choice questions grounded strictly in the provided text. "
+            "Output valid JSON only."
+        )
+
+        raw_text = self.gemini_provider.generate_raw(prompt, system_instruction=system_instruction)
+
+        # Robust JSON extraction
+        clean_json = raw_text.strip()
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_json)
+        if match:
+            clean_json = match.group(1).strip()
+
+        data = json.loads(clean_json)
 
         q_id = hashlib.sha256(
             f"{primary_chunk.filename}:{primary_chunk.page_number}:{data['question_stem'][:30]}".encode()
@@ -189,7 +237,7 @@ class AssessmentGenerator:
 
         return AssessmentQuestion(
             question_id=f"q_{q_id}",
-            topic=data.get("topic", "Machine Learning"),
+            topic=data.get("topic", topic_str),
             difficulty=difficulty,
             source_document=primary_chunk.filename,
             page_number=primary_chunk.page_number,

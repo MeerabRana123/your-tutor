@@ -67,6 +67,8 @@ class TutorService:
     def set_provider(self, provider: BaseModelProvider) -> None:
         """Dynamically switches active model provider."""
         self.provider = provider
+        if hasattr(self, "assessment_generator") and self.assessment_generator:
+            self.assessment_generator.gemini_provider = provider if isinstance(provider, GeminiProvider) else None
 
     def ingest_pdf(self, file_path: Path) -> SourceDocument:
         """
